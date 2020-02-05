@@ -1,121 +1,162 @@
 <template>
-  <div class="hello">
-    <h1>{{ msg }}</h1>
-    <p>
-      For a guide and recipes on how to configure / customize this project,<br />
-      check out the
-      <a href="https://cli.vuejs.org" target="_blank" rel="noopener"
-        >vue-cli documentation</a
-      >.
-    </p>
-    <h3>Installed CLI Plugins</h3>
-    <ul>
-      <li>
-        <a
-          href="https://github.com/vuejs/vue-cli/tree/dev/packages/%40vue/cli-plugin-babel"
-          target="_blank"
-          rel="noopener"
-          >babel</a
-        >
-      </li>
-      <li>
-        <a
-          href="https://github.com/vuejs/vue-cli/tree/dev/packages/%40vue/cli-plugin-router"
-          target="_blank"
-          rel="noopener"
-          >router</a
-        >
-      </li>
-      <li>
-        <a
-          href="https://github.com/vuejs/vue-cli/tree/dev/packages/%40vue/cli-plugin-vuex"
-          target="_blank"
-          rel="noopener"
-          >vuex</a
-        >
-      </li>
-      <li>
-        <a
-          href="https://github.com/vuejs/vue-cli/tree/dev/packages/%40vue/cli-plugin-eslint"
-          target="_blank"
-          rel="noopener"
-          >eslint</a
-        >
-      </li>
-    </ul>
-    <h3>Essential Links</h3>
-    <ul>
-      <li>
-        <a href="https://vuejs.org" target="_blank" rel="noopener">Core Docs</a>
-      </li>
-      <li>
-        <a href="https://forum.vuejs.org" target="_blank" rel="noopener"
-          >Forum</a
-        >
-      </li>
-      <li>
-        <a href="https://chat.vuejs.org" target="_blank" rel="noopener"
-          >Community Chat</a
-        >
-      </li>
-      <li>
-        <a href="https://twitter.com/vuejs" target="_blank" rel="noopener"
-          >Twitter</a
-        >
-      </li>
-      <li>
-        <a href="https://news.vuejs.org" target="_blank" rel="noopener">News</a>
-      </li>
-    </ul>
-    <h3>Ecosystem</h3>
-    <ul>
-      <li>
-        <a href="https://router.vuejs.org" target="_blank" rel="noopener"
-          >vue-router</a
-        >
-      </li>
-      <li>
-        <a href="https://vuex.vuejs.org" target="_blank" rel="noopener">vuex</a>
-      </li>
-      <li>
-        <a
-          href="https://github.com/vuejs/vue-devtools#vue-devtools"
-          target="_blank"
-          rel="noopener"
-          >vue-devtools</a
-        >
-      </li>
-      <li>
-        <a href="https://vue-loader.vuejs.org" target="_blank" rel="noopener"
-          >vue-loader</a
-        >
-      </li>
-      <li>
-        <a
-          href="https://github.com/vuejs/awesome-vue"
-          target="_blank"
-          rel="noopener"
-          >awesome-vue</a
-        >
-      </li>
-    </ul>
+  <div class="main">
+    <h1>HPLToken CROWD SALE</h1>
+    <h2 style="font-style:italic;margin-top: 20px">Ends in</h2>
+    <flip-countdown :deadline="deadline" v-if="deadline"></flip-countdown>
+    <h2 style="margin-top: 40px">LIMITED CAP: {{ cap }} wei = {{ capInEth }} ETH</h2>
+    <a-progress :percent="percent" status="active" />
+
+    <div style="margin: 40px">
+      <h3>Price: 1 HPL = {{ price }} ETH</h3>
+      <a-form layout="inline" :form="form" @submit.prevent="handleSubmit">
+        <a-form-item label="ETH Amount">
+          <a-input
+            v-decorator="[
+              'amount',
+              {
+                rules: [
+                  { required: true, message: 'Please input the amount!' },
+                  {
+                    validator: this.checkAmount
+                  }
+                ]
+              }
+            ]"
+          />
+        </a-form-item>
+        <a-form-item>
+          <a-button type="primary" html-type="submit">
+            Submit
+          </a-button>
+        </a-form-item>
+      </a-form>
+      <i>**Transaction Fee: {{ fee }}**</i>
+    </div>
+
+    <h3>
+      Your address <span class="address">{{ account }}</span>
+    </h3>
+    <h3>Balance: {{ balance }} ETH</h3>
+
+    <!-- LOADER -->
+    <div :class="{ cover: loading, hide: !loading }">
+      <h1 class="info">Waiting for Metamask</h1>
+      <a-spin size="large" :spinning="loading" />
+    </div>
   </div>
 </template>
 
 <script>
+import FlipCountdown from 'vue2-flip-countdown';
+import moment from 'moment';
+import { mapState, mapActions } from 'vuex';
+import BN from 'bn.js';
+
 export default {
-  name: "HelloWorld",
-  props: {
-    msg: String
+  name: 'hello-world',
+  components: {
+    FlipCountdown
+  },
+  data() {
+    return {
+      form: this.$form.createForm(this),
+      fee: null
+    };
+  },
+  mounted() {
+    this.loadWeb3();
+    this.getAccount();
+  },
+  updated() {
+    if (this.web3 && this.currentAccount !== this.account) {
+      this.getBalance(this.account);
+      this.currentAccount = this.account;
+    }
+    if (this.web3 && !this.crowdSale) {
+      const {
+        utils: { fromWei }
+      } = this.web3;
+      this.loadCrowdSale().then(() => {
+        this.estimateBuyTokensGas().then(val => {
+          const gas = new BN(val);
+          const g_price = new BN(this.gas_price);
+          this.fee = fromWei((gas * g_price).toString());
+        });
+      });
+    }
+  },
+  computed: {
+    ...mapState('setting', ['loading', 'web3', 'account', 'balance', 'gas_price']),
+    ...mapState('crowdSale', ['crowdSale', 'rate', 'wallet', 'weiRaised', 'cap', 'openingTime', 'closingTime', 'investorMinCap', 'investorHardCap']),
+    deadline() {
+      if (this.closingTime) {
+        return moment(Number(this.closingTime) * 1000).format('YYYY-MM-DD hh:mm:ss');
+      }
+      return null;
+    },
+    percent() {
+      if (this.weiRaised && this.cap) {
+        const raised = new BN(this.weiRaised);
+        const cap = new BN(this.cap);
+        return (raised * 100) / cap; //not test
+      }
+      return 0;
+    },
+    price() {
+      if (this.rate) {
+        return 1 / this.rate;
+      }
+      return 0;
+    },
+    capInEth() {
+      if (this.cap && this.web3) {
+        return this.web3.utils.fromWei(this.cap.toString(), 'ether');
+      }
+      return 0;
+    }
+  },
+  methods: {
+    ...mapActions('setting', ['loadWeb3', 'getAccount', 'getBalance']),
+    ...mapActions('crowdSale', ['loadCrowdSale', 'estimateBuyTokensGas']),
+    handleSubmit() {
+      this.form.validateFields((err, values) => {
+        if (!err) {
+          console.log('form', values);
+        }
+      });
+    },
+    checkAmount(rule, value, callback) {
+      if (this.fee && this.web3 && this.investorMinCap && this.investorHardCap) {
+        const {
+          utils: { fromWei }
+        } = this.web3;
+        const val = parseFloat(value);
+        const fee = parseFloat(this.fee);
+        const balance = parseFloat(this.balance);
+        const min = parseFloat(fromWei(this.investorMinCap));
+        const max = parseFloat(fromWei(this.investorHardCap));
+        console.log(val + fee, balance, min, max);
+
+        if (val + fee > balance) {
+          callback('Insufficent balance');
+        }
+
+        if (val < min) {
+          callback('Minimum 0.002 ETH');
+        }
+
+        if (val > max) {
+          callback('Maximum 50 ETH');
+        }
+      }
+      callback();
+    }
   }
 };
 </script>
 
 <!-- Add "scoped" attribute to limit CSS to this component only -->
 <style scoped lang="scss">
-h3 {
-  margin: 40px 0 0;
-}
 ul {
   list-style-type: none;
   padding: 0;
@@ -126,5 +167,27 @@ li {
 }
 a {
   color: #42b983;
+}
+
+.main {
+  padding: 40px 20%;
+}
+.cover {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba($color: #fff, $alpha: 0.8);
+}
+.info {
+  margin: 40px;
+}
+.hide {
+  display: none;
+}
+.address {
+  font-size: 20px;
+  font-style: italic;
 }
 </style>
